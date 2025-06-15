@@ -255,3 +255,184 @@ curl -s -k "https://${PROM_ROUTE}/api/v1/query?query=$(python3 -c "import urllib
 
 ---
 
+### 15. Network Transmit Errors per Pod and Namespace (Last 5 Minutes)
+
+This command fetches the rate of network transmit errors observed for each container, grouped by pod and namespace, over the last 5 minutes. It helps identify pods that are experiencing network issues when sending data.
+
+```bash
+curl -s -k "https://${PROM_ROUTE}/api/v1/query?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('sum by (pod, namespace) (rate(container_network_transmit_errors_total[5m]))'))")" -H "Authorization: Bearer ${TOKEN}" | jq
+```
+
+---
+
+### 16. Network Receive Errors per Pod and Namespace (Last 5 Minutes)
+
+This command fetches the rate of network receive errors observed for each container, grouped by pod and namespace, over the last 5 minutes. It helps identify pods that are experiencing network issues when receiving data.
+
+```bash
+curl -s -k "https://${PROM_ROUTE}/api/v1/query?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('sum by (pod, namespace) (rate(container_network_receive_errors_total[5m]))'))")" -H "Authorization: Bearer ${TOKEN}" | jq
+```
+
+---
+
+### 17. Network Bytes Transmitted and Received per Pod and Namespace (Last 5 Minutes)
+
+These commands show the rate of network bytes transmitted and received by each container, grouped by pod and namespace, averaged over the last 5 minutes.
+
+#### Bytes Transmitted
+
+```bash
+curl -s -k "https://${PROM_ROUTE}/api/v1/query?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('sum by (pod, namespace) (rate(container_network_transmit_bytes_total[5m]))'))")" -H "Authorization: Bearer ${TOKEN}" | jq
+```
+
+#### Bytes Received
+
+```bash
+curl -s -k "https://${PROM_ROUTE}/api/v1/query?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('sum by (pod, namespace) (rate(container_network_receive_bytes_total[5m]))'))")" -H "Authorization: Bearer ${TOKEN}" | jq
+```
+---
+
+
+### 18. CoreDNS Request Duration – 95th Percentile (Last 5 Minutes)
+
+This command calculates the 95th percentile of DNS request duration handled by CoreDNS over the last 5 minutes.
+
+- It shows how long 95% of DNS requests took to complete.
+- Useful for identifying DNS latency or performance issues affecting the cluster.
+
+```bash
+curl -s -k "https://${PROM_ROUTE}/api/v1/query?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('histogram_quantile(0.95, sum by (le) (rate(coredns_dns_request_duration_seconds_bucket[5m])))'))")" -H "Authorization: Bearer ${TOKEN}" | jq
+````
+
+#### Sample Output
+
+```json
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      {
+        "metric": {},
+        "value": [
+          1750003862.319,
+          "0.0019697222222222225"
+        ]
+      }
+    ]
+  }
+}
+```
+
+#### Explanation
+
+* The **value** `0.00197` means 95% of DNS requests completed in under \~2 milliseconds.
+* This is a good health indicator for internal DNS resolution time.
+
+---
+
+### 19. Available Endpoint Count per Service and Namespace
+
+This command returns the number of available pod endpoints behind each Kubernetes service, grouped by service and namespace.
+
+- It’s useful for checking how many healthy pod endpoints are backing each service.
+- If a service has `0` available endpoints, it may indicate that pods are not running, not ready, or not correctly matched by the service selector.
+
+```bash
+curl -s -k "https://${PROM_ROUTE}/api/v1/query?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('count(kube_endpoint_address_available) by (service, namespace)'))")" -H "Authorization: Bearer ${TOKEN}" | jq
+```
+
+---
+
+### 20. Network Packet Drops per Node and Interface (Last 5 Minutes)
+
+This command retrieves the rate of network packet drops (both receive and transmit) for each network interface on every node over the last 5 minutes.
+
+- It adds the receive and transmit drop rates using:
+  - `node_network_receive_drop_total`
+  - `node_network_transmit_drop_total`
+- Grouped by `instance` (node) and `device` (network interface)
+
+High values may indicate network congestion, hardware issues, or driver problems.
+
+```bash
+curl -s -k "https://${PROM_ROUTE}/api/v1/query?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('sum by (instance, device) (rate(node_network_receive_drop_total[5m]) + rate(node_network_transmit_drop_total[5m]))'))")" -H "Authorization: Bearer ${TOKEN}" | jq
+```
+---
+
+## 🧾 Formatting Prometheus API Output in Tabular Format (using `jq` + `@tsv`)
+
+By default, Prometheus queries return long JSON structures that can be hard to read. To make the output of any Prometheus query easier to read, especially in the terminal, you can use this generic and concise `jq` command to tabulate results.
+
+### ✅ Easy-to-Read Format (Works for Any Query)
+
+```bash
+curl -s -k "$PROM_URL" -H "Authorization: Bearer ${TOKEN}" | jq -r '
+  .data.result[] |
+  [.metric[]?, .value[1]] |
+  @tsv'
+```
+---
+
+## Filtering Prometheus Queries by Namespace in OpenShift CLI
+
+When querying Prometheus metrics via the OpenShift CLI (`oc`) or direct API calls, you often want to **restrict results to a specific namespace** to focus on relevant workloads. This allows to focus troubleshooting on a particular project/namespace. Helps reduce noise from unrelated metrics and speed up queries by limiting scope.
+
+### How to Add Namespace Filtering in PromQL Queries
+
+Prometheus metrics can be filtered by labels inside curly braces `{}`. The **namespace label** is commonly named `namespace`.
+
+### Syntax
+
+```promql
+metric_name{namespace="your-namespace", other_label="value", ...}
+```
+
+### Example: Filtering CPU Usage by Namespace
+
+### Original Query (all namespaces):
+
+```promql
+sum by (pod, namespace) (rate(container_cpu_usage_seconds_total{container!=""}[5m]))
+```
+
+### Namespace-filtered Query (`my-namespace`):
+
+```promql
+sum by (pod, namespace) (rate(container_cpu_usage_seconds_total{namespace="my-namespace", container!=""}[5m]))
+```
+
+---
+
+### How to Use This in Your `curl` Command
+
+1. Set your namespace variable:
+
+```bash
+NAMESPACE="my-namespace"
+```
+
+2. Use Python to URL-encode the query with the namespace filter:
+
+```bash
+curl -s -k "https://${PROM_ROUTE}/api/v1/query?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('sum by (pod, namespace) (rate(container_cpu_usage_seconds_total{namespace=\"$NAMESPACE\", container!=\"\"}[5m]))'))")" -H "Authorization: Bearer ${TOKEN}" | jq
+```
+
+
+### Summary
+
+* **Add** `namespace="your-namespace"` inside metric selectors `{}` to filter.
+* **URL-encode** the entire query when passing via API.
+* This approach applies to **any Prometheus query** you use.
+
+---
+
+### Tip: Modify Other Queries
+
+Simply insert the namespace filter label inside the curly braces in your PromQL expressions, for example:
+
+```promql
+rate(kube_pod_container_status_restarts_total{namespace="my-namespace"}[1h])
+```
+
+
